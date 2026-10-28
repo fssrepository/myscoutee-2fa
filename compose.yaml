@@ -1,0 +1,19 @@
+services:
+  mfa:
+    build: .
+    environment:
+      MFA_API_TOKEN: ${MFA_API_TOKEN:?set MFA_API_TOKEN in .env}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?set MFA_ENCRYPTION_KEY in .env}
+      MFA_RP_ID: ${MFA_RP_ID:-localhost}
+      MFA_RP_ORIGIN: ${MFA_RP_ORIGIN:-http://localhost:18083}
+      MFA_RP_NAME: ${MFA_RP_NAME:-MyScoutee}
+      MFA_LISTEN_ADDR: 0.0.0.0:18083
+      MFA_DB_PATH: /data/mfa.db
+      MFA_DEMO_ENABLED: "true"
+    ports:
+      - 127.0.0.1:18083:18083
+    volumes:
+      - mfa-data:/data
+    restart: unless-stopped
+volumes:
+  mfa-data:

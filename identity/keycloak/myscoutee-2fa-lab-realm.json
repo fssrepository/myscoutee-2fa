@@ -1,0 +1,63 @@
+{
+  "realm": "myscoutee-2fa-lab",
+  "enabled": true,
+  "displayName": "MyScoutee 2FA identity lab",
+  "sslRequired": "none",
+  "clients": [
+    {
+      "clientId": "myscoutee-2fa-lab",
+      "name": "MyScoutee 2FA Go OIDC demo",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:18083/lab/oidc/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:18083"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:18083/"
+      }
+    },
+    {
+      "clientId": "http://localhost:18083/lab/saml/metadata",
+      "name": "MyScoutee 2FA Go SAML demo",
+      "enabled": true,
+      "protocol": "saml",
+      "baseUrl": "http://localhost:18083/lab/saml/result",
+      "redirectUris": [
+        "http://localhost:18083/lab/saml/acs"
+      ],
+      "attributes": {
+        "saml_assertion_consumer_url_post": "http://localhost:18083/lab/saml/acs",
+        "saml_force_post_binding": "true",
+        "saml.client.signature": "false",
+        "saml.server.signature": "true",
+        "saml.assertion.signature": "true",
+        "saml_name_id_format": "username"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "sandbox",
+      "enabled": true,
+      "email": "sandbox@example.invalid",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Sandbox-2FA-2026!",
+          "temporary": false
+        }
+      ],
+      "firstName": "Sandbox",
+      "lastName": "User"
+    }
+  ]
+}

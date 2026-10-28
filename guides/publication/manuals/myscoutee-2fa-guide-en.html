@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyScoutee 2FA Technical Guide · MSC-2FA-001</title>
+  <link rel="stylesheet" href="manual.css">
+</head>
+<body>
+<article class="manual">
+  <section class="cover" id="cover" aria-labelledby="document-title">
+    <div class="cover-logo">
+      <div class="cover-brand-name" aria-label="MyScoutee"><img src="myscoutee-logo.png" alt="" aria-hidden="true"><span>yScoutee</span></div>
+      <div class="cover-brand-subtitle">MyScoutee technical documentation</div>
+    </div>
+    <div class="cover-title-block">
+      <div class="cover-kicker">Authentication laboratory</div>
+      <h1 id="document-title">MyScoutee 2FA Technical Guide</h1>
+      <p class="cover-lead">A standalone Go sandbox for TOTP, HOTP, WebAuthn passkeys, recovery codes, and optional OIDC and SAML identity flows.</p>
+    </div>
+    <aside class="technology-sensitivity">
+      <strong>Trust boundary</strong>
+      <p>The factor API assumes a trusted application has already identified the user. Its bearer token is a server secret. The optional browser and Keycloak flows are a local laboratory; they do not create MyScoutee sessions.</p>
+    </aside>
+    <div class="cover-meta" aria-label="Document metadata">
+      <div><strong>Document ID</strong><span>MSC-2FA-001</span></div>
+      <div><strong>Version</strong><span>1.5.0</span></div>
+      <div><strong>Software</strong><span>myscoutee-2fa Go service</span></div>
+      <div><strong>Status</strong><span class="label controlled">Development sandbox</span></div>
+      <div><strong>Date</strong><span>28 October 2026</span></div>
+      <div><strong>Audience</strong><span>Developers and operators</span></div>
+    </div>
+  </section>
+
+  <section id="document-control">
+    <h2>Document control</h2>
+    <table class="compact"><tbody>
+      <tr><th scope="row">Purpose</th><td>Describe the current runnable sandbox and the boundary for a later MyScoutee backend integration.</td></tr>
+      <tr><th scope="row">Scope</th><td>TOTP, HOTP, WebAuthn, recovery codes, optional Keycloak OIDC/SAML flows, HTTP API, Docker, storage and security.</td></tr>
+      <tr><th scope="row">Sources</th><td>The <code>myscoutee-2fa</code> repository: <code>cmd/</code>, <code>internal/mfa/</code>, Compose files and <code>README.md</code>.</td></tr>
+      <tr><th scope="row">Integration state</th><td>The service runs independently. Current MyScoutee login and session handling do not call it.</td></tr>
+    </tbody></table>
+    <div class="callout note"><h3>Responsibility of the integrating backend</h3><p>Resolve and authorize the internal user ID, decide when a factor is required, and create or authorize the application session only after its own policy succeeds. The 2FA service verifies a proof; it does not make the MyScoutee login decision.</p></div>
+  </section>
+
+  <nav class="toc" aria-label="Contents">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#overview">Architecture and responsibilities</a></li>
+      <li><a href="#quickstart">Local start and trial</a></li>
+      <li><a href="#factor-flows">Factor lifecycle</a></li>
+      <li><a href="#otp-rationale">Why generated codes protect an account</a></li>
+      <li><a href="#passkey-method">Passkey methodology</a></li>
+      <li><a href="#api">HTTP API</a></li>
+      <li><a href="#deployment">Docker, nginx and identity lab</a></li>
+      <li><a href="#security">Data and security boundaries</a></li>
+      <li><a href="#myscoutee-integration">MyScoutee integration cases</a></li>
+      <li><a href="#verification">Verification and current limits</a></li>
+      <li><a href="#stack-map">Appendix A: technology coverage</a></li>
+      <li><a href="#references">Appendix B: standards and sources</a></li>
+    </ol>
+  </nav>
+
+  <section id="overview">
+    <h2>1 Architecture and responsibilities</h2>
+    <p><code>myscoutee-2fa</code> is an independent HTTP service. Trusted server callers manage and verify a user's second factors. A small browser page exercises the same endpoints locally.</p>
+    <div class="flowline" aria-label="Planned integration path">
+      <div>Browser<br>MyScoutee UI</div><span>→</span><div>MyScoutee backend<br>primary identity and policy</div><span>→</span><div>2FA API<br>TOTP, HOTP or WebAuthn</div><span>→</span><div>SQLite<br>encrypted OTP data</div>
+    </div>
+    <p>The development Compose publishes port 18083 only on host loopback. In a later deployment, the Go service can remain on a private network; nginx can supply the HTTPS origin required by browser WebAuthn. This is an integration design, not a deployed MyScoutee connection.</p>
+    <table class="compact"><thead><tr><th>Component</th><th>Responsibility</th></tr></thead><tbody>
+      <tr><td>Calling backend</td><td>Verified user ID, authorization, factor policy and application session.</td></tr>
+      <tr><td>2FA API</td><td>Factor enrollment, challenges, proof verification and factor state.</td></tr>
+      <tr><td>Browser</td><td>WebAuthn ceremony and OTP or recovery code entry.</td></tr>
+      <tr><td>SQLite volume</td><td>Factor records, public passkey credentials, ceremony state and recovery hashes.</td></tr>
+    </tbody></table>
+    <p>An optional Keycloak container supplies OIDC and SAML identity flows. Those protocols demonstrate possible upstream identity providers. Their result is separate from the factor API.</p>
+  </section>
+
+  <section id="quickstart">
+    <h2>2 Local start and trial</h2>
+    <ol>
+      <li>Copy <code>.env.example</code> to <code>.env</code>.</li>
+      <li>Generate two different random values for <code>MFA_API_TOKEN</code> and <code>MFA_ENCRYPTION_KEY</code>. The latter must decode to exactly 32 bytes.</li>
+      <li>Start the container. Open the English demo, which uses one fixed disposable user named <code>demo</code>, then select Authenticator app and its TOTP tab. Scan the QR code in the setup dialog; refresh it there if needed. Code fields are masked with an eye button, and OTP fields accept digits only. No browser token is needed.</li>
+    </ol>
+    <pre>cp .env.example .env
+openssl rand -base64 32   # MFA_API_TOKEN
+openssl rand -base64 32   # MFA_ENCRYPTION_KEY
+docker compose up --build -d
+curl http://localhost:18083/healthz</pre>
+  </section>
+
+  <section id="factor-flows">
+    <h2>3 Factor lifecycle</h2>
+    <p>The factor service answers a narrow question: did the caller present a valid proof for the named account? It does not establish who the caller is. The MyScoutee backend must establish primary identity and bind the proof to that same internal user ID. Enrollment is a security-sensitive account change, not a public registration endpoint.</p>
+    <p>Both OTP methods can use an authenticator app. They use the same HMAC-based construction but choose a different moving input. TOTP derives each code from a 30-second time step; HOTP derives it from a counter. The app must explicitly support HOTP; a TOTP QR code and an HOTP QR code are not interchangeable. The detailed algorithms are defined in <a href="https://www.rfc-editor.org/rfc/rfc4226">RFC 4226</a> and <a href="https://www.rfc-editor.org/rfc/rfc6238">RFC 6238</a>.</p>
+    <h3>TOTP authenticator app</h3>
+    <ol>
+      <li>The service randomly generates a 20-byte shared seed, keeps it pending for ten minutes, and returns a QR image, manual secret and <code>otpauth://totp/</code> URL. Scanning stores the same seed in the user's app. A QR image is a convenient transport for the secret, not a proof of identity; anyone who copies it during setup could generate the same codes.</li>
+      <li>At each 30-second step, the app computes an HMAC-SHA-1 value from the seed and time counter, truncates it and displays six decimal digits. The server independently computes candidates from its encrypted copy of the seed. The digits are never the seed itself.</li>
+      <li>A first valid code confirms that the app received the seed. The service activates the factor, records that step as consumed and returns ten recovery codes. The user must wait for the next code before a sign-in trial.</li>
+      <li>For later checks, the service accepts the current step and one step either side to tolerate small clock differences. It records the highest accepted step atomically. A code from the same or an older step cannot be used again. A wider clock window would improve tolerance but increase the number of guesses that can match.</li>
+    </ol>
+    <p>A displayed code may be accepted outside the single 30-second interval shown by the app because of the clock window; it is still rejected after the service consumes its step. The service allows at most five verification attempts per user in a 60-second window before returning 429, and clears the count after success. The first setup code is also consumed. These details matter when designing the MyScoutee login prompt and retry message.</p>
+    <h3>HOTP authenticator app</h3>
+    <p>HOTP uses the same 20-byte random seed, HMAC-SHA-1 and six-digit output, but its moving input is a counter. The <code>otpauth://hotp/</code> URL starts at zero. For manual setup, select HOTP, SHA-1, six digits and starting counter zero. The app entry must be explicitly counter-based: a code with a 30-second countdown is TOTP. <a href="https://github.com/beemdevelopment/Aegis">Aegis for Android</a> is one documented HOTP-capable app.</p>
+    <p>A valid setup code proves receipt of the seed and activates the factor. The service accepts setup counters zero through nine because an app may advance before confirmation, then stores one beyond the matched counter. Every generated app code advances its counter, even if it is never submitted.</p>
+    <p>To recover from a few skipped app codes, verification tries the service's current counter and the next nine values. On success it stores one past the accepted value in the same transaction. Earlier codes then fail, and the counter survives a restart. If the app moves beyond that ten-value look-ahead, this lab cannot verify it without a new enrollment. The ten candidates also enlarge the online guessing surface, so the attempt limit matters.</p>
+    <h3>WebAuthn passkey</h3>
+    <p>Registration and authentication each have <em>begin</em> and <em>finish</em> steps. <code>X-Ceremony-ID</code> identifies a five-minute, one-use ceremony. The service requests a discoverable credential and user verification. Public credential data and the authenticator counter persist in SQLite; the private key stays with the platform authenticator, synced passkey provider or compatible security key. The full challenge and origin checks are described in Section 5 below.</p>
+    <h3>Recovery codes</h3>
+    <p>The service generates ten independent codes, each from 16 random bytes (128 bits). They appear in a one-time popup with a Copy codes action and are cleared from the browser view when it closes. Only SHA-256 hashes are stored; a successful use deletes the matching hash. Rotation generates a fresh set and revokes all earlier codes. A passkey-only user can request the first set after registration. Removing the last active factor revokes remaining recovery codes.</p>
+    <p>A recovery code is an emergency substitute for a lost factor, not a second factor to use every day. It is deliberately much harder to guess than a six-digit OTP, but anyone who obtains an unused code can spend it. MyScoutee should show new codes only to a recently verified account holder and require an additional policy check before rotation or factor removal. The sandbox itself does not implement that application-level reauthentication.</p>
+  </section>
+
+  <section id="otp-rationale">
+    <h2>4 Why generated codes protect an account</h2>
+    <p>A six-digit output has only one million possible values. Its protection does not come from the number of digits alone. It comes from combining a secret provisioned to the user's authenticator, an input that changes over time or by counter, a separate primary login, a bounded verification window, limited online guesses and one-use handling.</p>
+    <div class="flowline" aria-label="TOTP verification model">
+      <div>Trusted setup<br>random seed to app</div><span>→</span><div>App and service<br>compute same HMAC</div><span>→</span><div>User submits<br>six digits</div><span>→</span><div>Service checks<br>window and replay</div>
+    </div>
+    <table class="compact"><thead><tr><th>Control</th><th>What it changes</th><th>What remains possible</th></tr></thead><tbody>
+      <tr><td>Independent secret</td><td>A stolen password or primary session proof alone does not reveal the app's seed.</td><td>A copied QR image, compromised phone or stolen server seed can duplicate OTP generation.</td></tr>
+      <tr><td>Moving input</td><td>An old TOTP value ages out; an accepted HOTP value is behind the server counter.</td><td>A current code can be relayed immediately to a phishing site.</td></tr>
+      <tr><td>Replay state</td><td>The service consumes a TOTP time step or advances the HOTP counter after success.</td><td>It cannot undo a valid code already spent by an attacker before the real user.</td></tr>
+      <tr><td>Attempt limit</td><td>Five checks per user per minute cap online guessing through this API.</td><td>Availability attacks and weak application-level account binding still need separate controls.</td></tr>
+    </tbody></table>
+    <p><strong>Why this is a second factor:</strong> in an integrated login, MyScoutee would first verify its existing primary identity proof, then ask this service to verify a factor bound to the resolved internal account. A successful OTP response alone is not a login. Likewise, an API caller that can choose an arbitrary user ID and holds the global bearer token can verify or change that account's factors; the calling backend is therefore a critical trust boundary.</p>
+    <div class="callout warning"><h3>Security limit: real-time phishing</h3><p>TOTP and HOTP are manually entered, so a fake site can ask for a fresh code and relay it to the real service before it expires. NIST explicitly does not classify manual OTP entry as phishing resistant. Rate limiting and replay prevention reduce guessing and reuse, but do not solve live relay. Prefer a passkey for phishing-resistant sign-in when the application can provide a stable HTTPS origin and a complete account policy. See <a href="https://pages.nist.gov/800-63-4/sp800-63b/authenticators/">NIST SP 800-63B</a>.</p></div>
+    <p><strong>MyScoutee design implication:</strong> show the factor prompt only after the Firebase proof has been checked and the backend has resolved one internal user. Associate each challenge with that login attempt. Reject a factor response for a different account, expired attempt or already authorized session. The current lab's <code>{"valid":true}</code> is a proof result, not a session-bound authorization artifact.</p>
+  </section>
+
+  <section id="passkey-method">
+    <h2>5 Passkey methodology</h2>
+    <div class="callout note"><h3>Passkey in everyday terms</h3><p>A passkey is a way to prove that you control an authenticator without copying a code into the website. An authenticator can be a device's built-in credential store, a phone, a browser password manager or a FIDO2 security key. A separate password manager is not required. When you create a passkey, the authenticator generates two mathematically linked keys. It keeps the private key; this service saves the public key for the selected test user. Think of the public key as a lock the site can use to check a proof, while the private key is the only key that can produce that proof.</p><p>When you return, the site sends a fresh random challenge. You unlock the chosen authenticator with its own PIN, fingerprint or screen lock; it signs the challenge, and the site checks the signature with the saved public key. The unlock method stays with the authenticator. Some providers synchronize passkeys to your other devices; a physical security key usually keeps its credential on that key. A Google Password Manager PIN prompt belongs to Chrome's chosen provider, not to the 2FA lab, and the PIN is not sent to this service.</p></div>
+    <table class="compact"><thead><tr><th>What the user does</th><th>Authenticator code</th><th>Passkey</th></tr></thead><tbody>
+      <tr><td>Set up</td><td>Scan a QR code containing a shared seed.</td><td>Click Add passkey; choose a phone, password manager or security key offered by the browser.</td></tr>
+      <tr><td>Prove control later</td><td>Read and type six digits from the app.</td><td>Unlock the chosen device; it signs a fresh challenge in the background.</td></tr>
+      <tr><td>What the service stores</td><td>An encrypted copy of the same seed the app holds.</td><td>The public credential, never the private signing key.</td></tr>
+      <tr><td>Phishing behavior</td><td>A live fake page can relay a typed code.</td><td>The browser ties the credential to the site's RP ID and origin, so a lookalike domain cannot use it as that site.</td></tr>
+    </tbody></table>
+    <p>WebAuthn is the browser and server protocol; a passkey is a WebAuthn credential that can provide a familiar device unlock experience. FIDO2 also covers the authenticator-side protocol used by compatible devices. These names describe layers of one ceremony, not three separate server factors. The relying party (RP) is the site named by <code>MFA_RP_ID</code> and <code>MFA_RP_ORIGIN</code>. The <a href="https://www.w3.org/TR/webauthn-3/">W3C WebAuthn specification</a> defines the browser checks and server verification model.</p>
+    <p><strong>How to try this lab:</strong> open <code>http://localhost:18083/</code> in a regular browser window, select a disposable user and click <em>Add passkey</em>. The VS Code built-in browser may leave the native prompt unavailable. Chrome can offer Google Password Manager, a nearby phone or a compatible security key; choose an option you can unlock now. If Chrome asks for a Google Password Manager PIN, enter that provider PIN only if you know it; do not enter a TOTP/HOTP code or your Google account password. If you do not know the PIN, cancel the prompt and choose another available authenticator. After a successful creation the Passkeys count becomes one. <em>Verify passkey</em> then repeats a fresh challenge with the registered authenticator. This sandbox proof does not sign in to MyScoutee. See <a href="https://support.google.com/chrome/answer/13168025">Google Chrome Help on passkeys</a> for the provider options.</p>
+    <h3>Registration: create a credential for this account</h3>
+    <ol>
+      <li>The already authorized backend asks the 2FA service to begin registration for the resolved user ID. The service creates a random challenge and a one-use ceremony record that expires in five minutes.</li>
+      <li>The browser calls <code>navigator.credentials.create()</code> with the returned options. It checks that the calling page may use the RP ID and asks an authenticator to create a key pair. This lab requests a discoverable credential and user verification, usually a device PIN, biometric unlock or security-key PIN.</li>
+      <li>The browser sends the attestation result and ceremony ID to the finish endpoint. The Go WebAuthn library checks the challenge, RP/origin and ceremony data, then the service stores the public credential and authenticator state under the user. The private key is never sent to the service.</li>
+    </ol>
+    <h3>Authentication: prove possession without sending a secret</h3>
+    <ol>
+      <li>The service begins a fresh ceremony with a new challenge and the account's allowed credentials.</li>
+      <li>The browser calls <code>navigator.credentials.get()</code>. After local user verification, the authenticator signs data that includes the challenge and RP context with the private key. A code is not typed into a form.</li>
+      <li>The finish endpoint consumes the ceremony once, checks the signed assertion against the stored public credential, and rejects a clone warning from the authenticator counter. It returns a proof result for the caller to bind to the pending login or step-up action.</li>
+    </ol>
+    <p>The browser's origin and RP ID binding is the central phishing defense: a credential registered for the legitimate domain is not offered to an unrelated lookalike domain, and the server verifies the expected origin and challenge. A passkey may live on one security key or be synchronized across a user's devices by a provider; neither arrangement means that every device is automatically trusted by MyScoutee. The account owner still needs safe enrollment, recovery, device revocation and session policy.</p>
+    <div class="callout note"><h3>MyScoutee origin and account binding</h3><p>If the factor UI is later served through MyScoutee/nginx, configure its public HTTPS origin exactly in <code>MFA_RP_ORIGIN</code> and choose an RP ID valid for that domain. A passkey registered at the local <code>localhost</code> lab origin is not a production MyScoutee credential. The MyScoutee backend must mediate begin/finish for its authenticated internal account and decide whether a successful assertion completes login or authorizes a specific sensitive action.</p></div>
+    <p>The sandbox's <code>BeginLogin</code> is account-specific, not a complete username-less MyScoutee login flow. The service does not decide which MyScoutee account a browser session may claim. This is a deliberate integration boundary, especially if passkeys later become a primary sign-in method rather than a second step after Firebase identity.</p>
+  </section>
+
+  <section id="api">
+    <h2>6 HTTP API</h2>
+    <p>Trusted backend <code>/v1/</code> requests need <code>Authorization: Bearer &lt;MFA_API_TOKEN&gt;</code>. The caller maps <code>{id}</code> to its already authenticated user. In local demo mode only, the page issues an HTTP-only, same-site cookie scoped to <code>/v1/</code> for browser trials on the configured host and fixed <code>demo</code> user. Public <code>/healthz</code> needs no token.</p>
+    <table class="compact"><thead><tr><th>Method</th><th>Path after <code>/v1/users/{id}</code></th><th>Result</th></tr></thead><tbody>
+      <tr><td>GET</td><td><code>/factors</code></td><td>Enabled factors, passkey IDs and remaining recovery count.</td></tr>
+      <tr><td>POST</td><td><code>/totp/enrollment</code>, <code>/totp/confirm</code></td><td>Start and confirm TOTP enrollment.</td></tr>
+      <tr><td>POST</td><td><code>/hotp/enrollment</code>, <code>/hotp/confirm</code></td><td>Start and confirm HOTP enrollment.</td></tr>
+      <tr><td>POST</td><td><code>/verify</code></td><td>Verify <code>totp</code>, <code>hotp</code> or <code>recovery_code</code>.</td></tr>
+      <tr><td>POST</td><td><code>/recovery-codes/rotate</code></td><td>Replace and show recovery codes once.</td></tr>
+      <tr><td>POST</td><td><code>/passkeys/register/begin</code>, <code>/finish</code></td><td>Passkey registration ceremony.</td></tr>
+      <tr><td>POST</td><td><code>/passkeys/authenticate/begin</code>, <code>/finish</code></td><td>Passkey authentication ceremony.</td></tr>
+      <tr><td>DELETE</td><td><code>/passkeys/{credential-id}</code></td><td>Remove a passkey.</td></tr>
+      <tr><td>DELETE</td><td><code>/lab-reset</code> for <code>demo</code></td><td>Demo cookie only; delete server-side factors, codes and pending setup. Device-stored passkeys remain.</td></tr>
+    </tbody></table>
+    <div class="quick-grid">
+      <div class="card"><h3>Code verification</h3><pre>POST /v1/users/demo/verify
+{"method":"hotp","code":"123456"}
+
+{"valid":true}</pre></div>
+      <div class="card"><h3>WebAuthn finish</h3><p>Send the <em>begin</em> response's <code>ceremony_id</code> as <code>X-Ceremony-ID</code>. The request body is the browser's complete WebAuthn credential JSON.</p></div>
+    </div>
+    <p>Errors use a JSON <code>error</code> field. A request with neither a bearer token nor a valid demo cookie returns 401; a wrong bearer token also returns 401. A foreign browser origin returns 403, and a rate limit returns 429. A well-formed but wrong OTP or recovery code returns HTTP 200 with <code>{"valid":false}</code>.</p>
+  </section>
+
+  <section id="deployment">
+    <h2>7 Docker, nginx and identity lab</h2>
+    <p>The container listens on port 18083, runs without root privileges, and stores <code>/data/mfa.db</code> on a named volume. Development Compose publishes only <code>127.0.0.1:18083</code>.</p>
+    <table class="compact"><thead><tr><th>Variable</th><th>Meaning</th></tr></thead><tbody>
+      <tr><td><code>MFA_API_TOKEN</code></td><td>Required server bearer token, at least 32 characters.</td></tr>
+      <tr><td><code>MFA_ENCRYPTION_KEY</code></td><td>Required Base64 value, exactly 32 decoded bytes.</td></tr>
+      <tr><td><code>MFA_RP_ID</code>, <code>MFA_RP_ORIGIN</code></td><td>WebAuthn domain and exact browser origin; locally <code>localhost</code> and <code>http://localhost:18083</code>.</td></tr>
+      <tr><td><code>MFA_RP_NAME</code></td><td>Name displayed by the authenticator.</td></tr>
+      <tr><td><code>MFA_DB_PATH</code>, <code>MFA_LISTEN_ADDR</code></td><td>SQLite path and HTTP listening address.</td></tr>
+      <tr><td><code>MFA_DEMO_ENABLED</code></td><td>Enables the local browser page; Go default is off.</td></tr>
+    </tbody></table>
+    <div class="callout note"><h3>Later private deployment</h3><p>The MyScoutee backend calls the private service with its server token. The browser receives only WebAuthn options and responses mediated by the application. The nginx HTTPS origin must match <code>MFA_RP_ORIGIN</code>, and its domain must match <code>MFA_RP_ID</code>. Disable the demo and loopback port publishing for an integrated deployment.</p></div>
+    <p>Run <code>docker compose -f compose.yaml -f compose.identity.yaml up --build -d</code> for the identity lab. Keycloak is at <code>127.0.0.1:18084</code>. OIDC and SAML have separate trial indicators. Reset clears them and uses a fresh ID token for prompt-free Keycloak logout. The SAML tab exports SP metadata XML; import it via Clients → Import client in a new realm. The bundled realm has this client. Neither result grants a MyScoutee session.</p>
+  </section>
+
+  <section id="security">
+    <h2>8 Data and security boundaries</h2>
+    <p>The lab stores the material needed to verify future proofs, so protecting the service and its backup matters as much as protecting the browser form. At rest, the SQLite database stores OTP seeds and pending enrollments under AES-256-GCM with a random nonce per encrypted value. It stores recovery-code hashes and passkey public credential records. These controls do not make the server immune to a process compromise: a process with the encryption key can decrypt OTP seeds.</p>
+    <ul>
+      <li>TOTP/HOTP secrets and pending enrollments are AES-256-GCM encrypted in SQLite. Passkey private keys remain with the authenticator.</li>
+      <li>Recovery codes are random, one-use values; only hashes are stored.</li>
+      <li>WebAuthn ceremonies expire and are consumed once, including after a failed finish.</li>
+      <li>Back up the database and <code>MFA_ENCRYPTION_KEY</code> together. A different key causes startup failure.</li>
+      <li>The bearer token can be changed through the environment. Encryption-key rotation needs a data migration or factor re-enrollment.</li>
+      <li>The SQLite deployment is designed for one service instance.</li>
+    </ul>
+    <p>The bearer token authorizes operations for every user ID. The integrating backend must prove that each request concerns the correct user and operation. Never send the token to a production browser.</p>
+    <table class="compact"><thead><tr><th>Event</th><th>Present lab control</th><th>MyScoutee responsibility</th></tr></thead><tbody>
+      <tr><td>Stolen primary login proof</td><td>A separate enrolled factor can still be required.</td><td>Do not issue a fully authorized session until policy accepts the factor.</td></tr>
+      <tr><td>Guessed OTP</td><td>Short acceptance window, replay state and per-user attempt limit.</td><td>Protect the primary login, account lookup and API edge against abuse too.</td></tr>
+      <tr><td>Lost phone or security key</td><td>One-use recovery codes and factor removal endpoints.</td><td>Authenticate recovery and factor changes; notify users through existing account channels if policy requires it.</td></tr>
+      <tr><td>Stolen service token or database key</td><td>Encryption at rest and a server-only bearer boundary.</td><td>Keep secrets out of browsers and logs, restrict network access, rotate compromised credentials and restore safely.</td></tr>
+      <tr><td>Phishing site</td><td>WebAuthn origin/RP binding for passkeys; OTP has no equivalent binding.</td><td>Choose factor policy and a stable HTTPS origin; do not claim OTP is phishing resistant.</td></tr>
+    </tbody></table>
+    <p>The bundled Keycloak user and admin defaults are local demonstration credentials. Real Entra ID and Duo integrations require separately configured tenants or applications. A successful external identity result alone does not authorize a MyScoutee account link or a second-factor decision.</p>
+  </section>
+
+  <section id="myscoutee-integration">
+    <h2>9 MyScoutee integration cases</h2>
+    <p>Current MyScoutee login uses its existing Firebase proof and <code>/auth/session/login</code> session registration. The backend also has a personal MCP OAuth authorization flow for a different delegation purpose. This sandbox changes neither.</p>
+    <h3>Proposed login sequence</h3>
+    <div class="flowline" aria-label="Proposed MyScoutee login sequence">
+      <div>1 Verify Firebase proof<br>resolve internal user</div><span>→</span><div>2 Load enrolled factors<br>apply account policy</div><span>→</span><div>3 Verify chosen proof<br>bind to pending login</div><span>→</span><div>4 Create full session<br>record factor time</div>
+    </div>
+    <p>This is a design path, not current behavior. The backend would need a short-lived pending login state between steps 1 and 4. The pending state should identify the same internal user, expire, and be consumed once; a factor result for another account or login attempt must not complete it. If the account has no factor, policy must explicitly decide whether ordinary login may continue or enrollment is required. The existing <code>/auth/session/login</code> currently registers a session immediately, so simply adding a 2FA call after it would leave the session boundary unchanged.</p>
+    <table class="compact"><thead><tr><th>Possible use case</th><th>Later server-side connection</th></tr></thead><tbody>
+      <tr><td>Second factor at login</td><td>After verifying Firebase proof and resolving the internal user, query factor state. Verify TOTP/HOTP, passkey or recovery proof before accepting or fully authorizing the application session. The current <code>/auth/session/login</code> registers a session immediately, so an intermediate state and policy decision are needed there.</td></tr>
+      <tr><td>Factor setup and recovery</td><td>The authenticated account settings page uses only the internal user ID resolved by the backend. Show QR provisioning and once-visible recovery codes to that account holder. Keep the service token on the server.</td></tr>
+      <tr><td>Step-up for sensitive actions</td><td>The backend may require a fresh factor before actions such as <code>/auth/me/delete</code> or operator configuration changes. The current 2FA API returns only <code>valid</code>; MyScoutee must bind that result to a short time window and the exact authorized action.</td></tr>
+      <tr><td>Enterprise SSO</td><td>The Keycloak OIDC/SAML lab demonstrates protocol exchange. Entra ID or Duo can be configured as external providers later. Map verified <em>issuer + subject</em> to an account through an explicit linking process; matching email alone is insufficient. Apply factor policy separately.</td></tr>
+    </tbody></table>
+    <h3>Account settings and recovery sequence</h3>
+    <p>Enrollment should begin from an authenticated MyScoutee settings page after the backend resolves its own user ID. For TOTP/HOTP, show the QR only to that user and activate the factor only after the first code. For a passkey, run begin/finish on the correct MyScoutee origin. Show recovery codes once and ask the user to store them away from the device holding the factor. Replacing a phone, rotating codes or removing the last factor needs a recent trusted proof and an explicit recovery policy; otherwise a stolen primary session could replace the defender's factors.</p>
+    <h3>Step-up and enterprise identity</h3>
+    <p>For a sensitive operation such as account deletion, MyScoutee could create a pending action with an action ID, user ID and short expiry. After a factor proof, the backend marks only that pending action as approved and executes it once. A generic <code>valid</code> result must not be reusable for unrelated operations. OIDC and SAML follow a different methodology: an identity provider authenticates the user and returns a verified identity assertion to the relying application. The local OIDC adapter uses authorization code with PKCE, state and nonce, then checks the ID token; the SAML adapter validates provider metadata, a tracked request and the signed response. Neither protocol by itself says that MyScoutee's factor policy has been met.</p>
+    <p>Keycloak is the runnable local provider in this lab. Entra ID and Duo would need their own tenant or application settings and a deliberate account mapping. For either OIDC or SAML, use a stable provider identifier and subject to link accounts; do not auto-link on email text alone. The backend then decides whether the provider's authentication context satisfies a MyScoutee policy or whether this factor service must perform a separate step. The lab does not currently consume external MFA claims as proof.</p>
+    <div class="callout note"><h3>Integration boundary</h3><p>The factor service verifies a proof for a user ID supplied by a trusted caller. It does not authenticate MyScoutee browser sessions, assign roles, or replace existing account management. OIDC/SAML lab results are not automatically registered as factors.</p></div>
+  </section>
+
+  <section id="verification">
+    <h2>10 Verification and current limits</h2>
+    <p>Go tests cover TOTP/HOTP enrollment, replay prevention, HOTP resynchronization, recovery code use and rotation, restart persistence, and signed WebAuthn registration and authentication. Negative checks cover wrong tokens, foreign browser origins, expired or disabled demo sessions, reused ceremonies, rate limits and a wrong encryption key. The English tabbed page, logo asset and QR image are checked separately.</p>
+    <pre>go test ./...
+go vet ./...
+docker build -t myscoutee-2fa:local .
+node --check internal/mfa/web/demo.js</pre>
+    <p>Container checks cover <code>/healthz</code> and protected API responses. Manual trials with a real authenticator app and passkey device are still needed at the chosen integration origin. External Entra ID and Duo credentials are not bundled. This service is not yet in the MyScoutee login or session path.</p>
+    <p>There is no SMS, email or MyScoutee password database here. The optional OIDC/SAML trials are identity flows, not automatic account linking or MFA acceptance. The calling application owns the time and policy of the second-factor check.</p>
+    <div class="footer-note">Document ID: MSC-2FA-001 · Version: 1.5.0 · On changes, review the Go API, Compose environment and security boundaries together.</div>
+  </section>
+
+  <section id="stack-map">
+    <h2>Appendix A · Technology coverage in the sandbox</h2>
+    <p>The shared “2FA Stack” list combines methods, standards, client apps, identity providers and hardware. “Available” below means runnable behavior in this repository, not certification of every external product.</p>
+    <table class="compact"><thead><tr><th>Items</th><th>Current role and status</th></tr></thead><tbody>
+      <tr><td><strong>TOTP</strong><br>Google Authenticator<br>Microsoft Authenticator</td><td>Available. Standard TOTP provisioning URL and QR code; those apps can act as TOTP clients.</td></tr>
+      <tr><td><strong>HOTP</strong></td><td>Available. Counter-based setup and ten-step look-ahead during activation and later verification.</td></tr>
+      <tr><td><strong>WebAuthn, passkeys, FIDO2</strong><br>YubiKey</td><td>WebAuthn relying-party flows are available. Browser/authenticator provide the device-side FIDO2 behavior. A compatible YubiKey may work if it supports discoverable credentials and user verification; physical-device testing remains open.</td></tr>
+      <tr><td><strong>OAuth 2.0, OIDC, SAML 2.0</strong></td><td>Separate identity lab: OIDC authorization code + PKCE and SAML service provider. These are not factor types in the 2FA API.</td></tr>
+      <tr><td><strong>Keycloak</strong></td><td>Optional local Docker IdP with an imported demo realm for OIDC/SAML.</td></tr>
+      <tr><td><strong>Microsoft Entra ID, Duo Security</strong></td><td>Generic OIDC/SAML adapters can be configured, but no live tenant, credentials or verified vendor integration are bundled.</td></tr>
+      <tr><td><strong>HSM</strong></td><td>Not included. TOTP/HOTP secrets use the AES key supplied through the environment.</td></tr>
+    </tbody></table>
+    <div class="callout note"><h3>How to read the lab</h3><p>TOTP, HOTP, passkeys and recovery codes are factor exercises. OIDC/SAML and Keycloak are external identity exercises. Recovery codes, absent from the shared list, make factor-loss recovery testable.</p></div>
+  </section>
+
+  <section id="references">
+    <h2>Appendix B · Standards and source notes</h2>
+    <p>This guide distinguishes standards-level properties from behavior verified in this repository. The standards explain the algorithms and trust model; the Go source and tests determine what this lab actually implements. The design recommendations for MyScoutee are proposed integration work, not claims about a deployed feature.</p>
+    <ul class="references-list">
+      <li><a href="https://www.rfc-editor.org/rfc/rfc4226">RFC 4226: HOTP</a> - HMAC construction, counter, decimal truncation, verifier window and throttling.</li>
+      <li><a href="https://www.rfc-editor.org/rfc/rfc6238">RFC 6238: TOTP</a> - time-step moving factor and clock skew.</li>
+      <li><a href="https://www.w3.org/TR/webauthn-3/">W3C Web Authentication, Level 3</a> - RP ID, browser origin, challenge, public-key ceremony and user verification.</li>
+      <li><a href="https://pages.nist.gov/800-63-4/sp800-63b/authenticators/">NIST SP 800-63B: Authenticators</a> - OTP phishing limitation, recovery concepts and phishing-resistant authentication.</li>
+      <li><code>internal/mfa/server.go</code>, <code>store.go</code>, <code>oidc.go</code>, <code>saml_lab.go</code> and tests - current lab parameters, API behavior and storage.</li>
+    </ul>
+  </section>
+</article>
+</body>
+</html>

@@ -1,0 +1,25 @@
+# Optional local identity lab. Run with:
+# docker compose -f compose.yaml -f compose.identity.yaml up --build -d
+services:
+  mfa:
+    environment:
+      MFA_OIDC_ISSUER: http://localhost:18084/realms/myscoutee-2fa-lab
+      MFA_OIDC_CLIENT_ID: myscoutee-2fa-lab
+      MFA_OIDC_REDIRECT_URL: http://localhost:18083/lab/oidc/callback
+      MFA_OIDC_BACKCHANNEL_ORIGIN: http://keycloak:8080
+      MFA_SAML_IDP_METADATA_URL: http://keycloak:8080/realms/myscoutee-2fa-lab/protocol/saml/descriptor
+    depends_on:
+      - keycloak
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-local-demo-change-me}
+      KC_HOSTNAME: http://localhost:18084
+      KC_HTTP_ENABLED: "true"
+    ports:
+      - 127.0.0.1:18084:8080
+    volumes:
+      - ./identity/keycloak/myscoutee-2fa-lab-realm.json:/opt/keycloak/data/import/myscoutee-2fa-lab-realm.json:ro
+    restart: unless-stopped

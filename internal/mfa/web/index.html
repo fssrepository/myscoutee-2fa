@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>2FA Lab · MyScoutee</title>
+  <link rel="stylesheet" href="/assets/demo.css">
+  <script src="/assets/demo.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand"><img src="/assets/logo.png" alt="" width="40" height="40"><span>MyScoutee <strong>2FA Lab</strong></span></div>
+    <span class="environment">Local sandbox</span>
+  </header>
+  <main class="app-shell">
+    <div class="intro">
+      <p class="eyebrow">Explore the sign-in factors</p>
+      <h1>Try two-factor authentication</h1>
+      <button id="reset-user" class="button danger small intro-reset" type="button" aria-label="Reset demo user">Reset</button>
+      <p>Use a disposable test user to enroll an authenticator app, create a passkey, or try recovery codes. This lab does not sign you in to MyScoutee.</p>
+    </div>
+
+    <section class="account-card" aria-label="Demo factor status">
+      <div class="factor-status" aria-label="Enabled factors">
+        <div><span>TOTP</span><strong id="status-totp">Checking…</strong></div>
+        <div><span>HOTP</span><strong id="status-hotp">Checking…</strong></div>
+        <div><span>Passkeys</span><strong id="status-passkeys">Checking…</strong></div>
+        <div><span>Recovery codes</span><strong id="status-codes">Checking…</strong></div>
+      </div>
+    </section>
+
+    <section class="identity-card" aria-labelledby="identity-status-title">
+      <h2 id="identity-status-title">Identity protocols</h2>
+      <div class="factor-status identity-status" aria-label="Identity trial status">
+        <div><span>OpenID Connect</span><strong id="status-oidc"><!-- OIDC_STATUS --></strong></div>
+        <div><span>SAML 2.0</span><strong id="status-saml"><!-- SAML_STATUS --></strong></div>
+      </div>
+    </section>
+
+    <dialog id="reset-dialog" class="setup-dialog" aria-labelledby="reset-dialog-title">
+      <div class="dialog-heading"><div><p class="eyebrow">Start over</p><h3 id="reset-dialog-title">Reset the demo user?</h3></div><button id="reset-close" class="dialog-close" type="button" aria-label="Close reset dialog" title="Close"><span aria-hidden="true">&times;</span></button></div>
+      <p>This deletes this lab user's factors, recovery codes and pending setup, and clears completed identity trials. When the local Keycloak lab is running, it also signs out there; confirm on the Keycloak page if asked. A device-stored passkey may remain, but will no longer work with this lab user.</p>
+      <button id="reset-confirm" class="button danger" type="button">Delete demo data and start over</button>
+      <output class="dialog-feedback" role="status" aria-live="polite" hidden></output>
+    </dialog>
+
+    <nav class="tab-bar" role="tablist" aria-label="Lab areas">
+      <button id="tab-auth" role="tab" aria-selected="true" aria-controls="panel-auth" tabindex="0" type="button">Authenticator app</button>
+      <button id="tab-passkey" role="tab" aria-selected="false" aria-controls="panel-passkey" tabindex="-1" type="button">Passkey</button>
+      <button id="tab-recovery" role="tab" aria-selected="false" aria-controls="panel-recovery" tabindex="-1" type="button">Recovery codes</button>
+      <button id="tab-identity" role="tab" aria-selected="false" aria-controls="panel-identity" tabindex="-1" type="button">Identity protocols</button>
+    </nav>
+
+    <section id="panel-auth" class="tab-panel" role="tabpanel" aria-labelledby="tab-auth">
+      <div class="auth-content">
+      <div class="panel-heading"><div><p class="eyebrow">Code-based factors</p><h2>Authenticator app</h2></div></div>
+      <div class="auth-tip"><span class="auth-tip-badge">Start with TOTP</span><div class="auth-tip-copy"><span><strong>TOTP</strong> uses time: your app shows a new six-digit code every 30 seconds.</span><span><strong>HOTP</strong> uses a counter: the app advances it each time it generates a code, and the server checks the next unused value.</span><span>Both use an authenticator app, but HOTP needs an app that explicitly supports it.</span></div></div>
+      <nav class="subtab-bar" role="tablist" aria-label="Authenticator code types">
+        <button id="tab-totp" role="tab" aria-selected="true" aria-controls="panel-totp" tabindex="0" type="button">TOTP · Time-based</button>
+        <button id="tab-hotp" role="tab" aria-selected="false" aria-controls="panel-hotp" tabindex="-1" type="button">HOTP · Counter-based</button>
+      </nav>
+      <section id="panel-totp" class="auth-subpanel" role="tabpanel" aria-labelledby="tab-totp">
+        <article class="method-card" aria-labelledby="totp-title">
+          <div class="card-title"><span class="method-icon">01</span><div><h3 id="totp-title">Time-based code · TOTP</h3><p>Works with Google Authenticator, Microsoft Authenticator, and other TOTP apps.</p></div></div>
+          <ol class="steps"><li>Open your authenticator app and choose <strong>Add account → Scan QR code</strong>.</li><li>Click the button below and scan the QR code shown here.</li><li>Enter the six-digit code from your app to finish setup.</li></ol>
+          <button id="totp-start" class="button" type="button">Show setup QR code</button>
+          <dialog id="enrollment" class="setup-dialog" aria-labelledby="totp-dialog-title">
+            <div class="dialog-heading"><div><p class="eyebrow">Authenticator app</p><h3 id="totp-dialog-title">Set up TOTP</h3></div><button id="totp-close" class="dialog-close" type="button" aria-label="Close TOTP setup" title="Close"><span aria-hidden="true">&times;</span></button></div>
+            <div class="qr-layout"><img id="qr" alt="TOTP setup QR code" width="220" height="220"><div><h4>Scan this QR code</h4><p>Point your authenticator app at the code. If scanning is unavailable, enter this setup key manually:</p><code id="secret" class="secret"></code></div></div>
+            <button id="totp-refresh" class="button secondary small refresh-qr" type="button">Generate new QR code</button>
+            <div class="inline-form"><label for="confirm-code">Code from your app</label><input id="confirm-code" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6-digit code"><button id="totp-confirm" class="button" type="button">Activate TOTP</button></div>
+            <output class="dialog-feedback" role="status" aria-live="polite" hidden></output>
+          </dialog>
+          <div class="verify-box"><h4>Try a sign-in code</h4><p>After setup, wait for a new code. The setup code was already used.</p><div class="inline-form"><label for="totp-code">Current code</label><input id="totp-code" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6-digit code"><button id="totp-verify" class="button secondary" type="button">Verify code</button></div></div>
+        </article>
+      </section>
+      <section id="panel-hotp" class="auth-subpanel" role="tabpanel" aria-labelledby="tab-hotp" hidden>
+        <article class="method-card" aria-labelledby="hotp-title">
+          <div class="card-title"><span class="method-icon">02</span><div><h3 id="hotp-title">Counter-based code · HOTP</h3><p>For apps that explicitly support HOTP. Each generated code advances a counter.</p></div></div>
+          <p class="support-note">Use a separate app entry explicitly marked HOTP or counter-based, such as <a href="https://github.com/beemdevelopment/Aegis" target="_blank" rel="noopener noreferrer">Aegis on Android</a>. A code with a 30-second countdown is TOTP and will not activate here.</p>
+          <button id="hotp-start" class="button" type="button">Show HOTP setup QR code</button>
+          <dialog id="hotp-enrollment" class="setup-dialog" aria-labelledby="hotp-dialog-title">
+            <div class="dialog-heading"><div><p class="eyebrow">Counter-based code</p><h3 id="hotp-dialog-title">Set up HOTP</h3></div><button id="hotp-close" class="dialog-close" type="button" aria-label="Close HOTP setup" title="Close"><span aria-hidden="true">&times;</span></button></div>
+            <div class="qr-layout"><img id="hotp-qr" alt="HOTP setup QR code" width="220" height="220"><div><h4>Scan with an HOTP app</h4><p>Use the current QR code. For manual entry, select HOTP, SHA-1, six digits and starting counter 0. Up to nine skipped codes are accepted during setup. Manual setup key:</p><code id="hotp-secret" class="secret"></code></div></div>
+            <button id="hotp-refresh" class="button secondary small refresh-qr" type="button">Generate new QR code</button>
+            <div class="inline-form"><label for="hotp-confirm-code">First code from your app</label><input id="hotp-confirm-code" type="password" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="6-digit code"><button id="hotp-confirm" class="button" type="button">Activate HOTP</button></div>
+            <output class="dialog-feedback" role="status" aria-live="polite" hidden></output>
+          </dialog>
+          <div class="verify-box"><h4>Try the next HOTP code</h4><p>Generate a new code in your app. A used code cannot be submitted again.</p><div class="inline-form"><label for="hotp-code">Next code</label><input id="hotp-code" type="password" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="6-digit code"><button id="hotp-verify" class="button secondary" type="button">Verify code</button></div></div>
+        </article>
+      </section>
+      </div>
+    </section>
+
+    <section id="panel-passkey" class="tab-panel" role="tabpanel" aria-labelledby="tab-passkey" hidden>
+      <div class="passkey-content">
+      <div class="panel-heading"><div><h2>Passkey</h2></div></div>
+      <div class="auth-tip"><span class="auth-tip-badge">FIDO2 / WebAuthn</span><div class="auth-tip-copy"><span>Use a device, phone, password manager or FIDO2 security key. A separate password manager is optional.</span><span>If Chrome asks for a Google Password Manager PIN, use that PIN, not a lab code or Google account password.</span><span>Try this in a regular browser window; the VS Code built-in browser may not show the prompt.</span></div></div>
+      <article class="method-card"><div class="card-title"><span class="method-icon">PK</span><div><h3>Create and test a passkey</h3><p>Passkeys work on localhost or an HTTPS origin.</p></div></div><ol class="steps"><li>Click <strong>Add passkey</strong> and choose an option offered by your browser.</li><li>Click <strong>Verify passkey</strong> and approve the prompt again.</li><li>Review or remove saved credentials below.</li></ol><div class="actions"><button id="passkey-register" class="button" type="button">Add passkey</button><button id="passkey-auth" class="button secondary" type="button">Verify passkey</button><button id="passkey-cancel" class="button secondary" type="button" hidden>Cancel request</button></div><div id="passkeys" class="saved-list"></div></article>
+      </div>
+    </section>
+
+    <section id="panel-recovery" class="tab-panel" role="tabpanel" aria-labelledby="tab-recovery" hidden>
+      <div class="panel-heading"><div><p class="eyebrow">Account recovery</p><h2>Recovery codes</h2></div></div>
+      <article class="method-card">
+        <div class="recovery-heading"><h3>Save and use backup codes</h3><button id="recovery-rotate" class="button secondary" type="button">Generate new codes</button></div>
+        <p>Each code works once. Generating a new set immediately invalidates all older codes.</p>
+        <div class="inline-form"><label for="recovery-code">Recovery code to test</label><input id="recovery-code" type="password" autocomplete="off" spellcheck="false" placeholder="Enter one saved code"><button id="recovery-verify" class="button" type="button">Verify recovery code</button></div>
+      </article>
+    </section>
+
+    <section id="panel-identity" class="tab-panel" role="tabpanel" aria-labelledby="tab-identity" hidden>
+      <div class="identity-content">
+        <div class="panel-heading"><div><h2>Identity protocols</h2></div></div>
+        <nav class="subtab-bar" role="tablist" aria-label="Identity protocol types">
+          <button id="tab-oidc" role="tab" aria-selected="true" aria-controls="panel-oidc" tabindex="0" type="button">OpenID Connect</button>
+          <button id="tab-saml" role="tab" aria-selected="false" aria-controls="panel-saml" tabindex="-1" type="button">SAML 2.0</button>
+        </nav>
+        <section id="panel-oidc" class="identity-subpanel" role="tabpanel" aria-labelledby="tab-oidc"><!-- OIDC_LAB --></section>
+        <section id="panel-saml" class="identity-subpanel" role="tabpanel" aria-labelledby="tab-saml" hidden><!-- SAML_LAB --></section>
+      </div>
+    </section>
+
+    <dialog id="recovery-dialog" class="setup-dialog recovery-dialog" aria-labelledby="recovery-dialog-title">
+      <div class="dialog-heading"><div><p class="eyebrow">Account recovery</p><h3 id="recovery-dialog-title">Recovery codes</h3></div><button id="recovery-close" class="dialog-close" type="button" aria-label="Close recovery codes" title="Close"><span aria-hidden="true">&times;</span></button></div>
+      <div id="recovery-warning"><p>Generating a new set immediately invalidates your older recovery codes. Continue only when you are ready to save the new ones.</p><button id="recovery-generate" class="button" type="button">Generate codes</button></div>
+      <div id="recovery-created" hidden><p>Save these codes now. They cannot be displayed again after you close this window.</p><div class="codes-panel"><div class="codes-heading"><strong>New recovery codes — shown once</strong><button id="copy-codes" class="button secondary small" type="button">Copy codes</button></div><pre id="codes"></pre></div></div>
+      <output class="dialog-feedback" role="status" aria-live="polite" hidden></output>
+    </dialog>
+
+    <output id="result" class="feedback" role="status" aria-live="polite" hidden></output>
+  </main>
+</body>
+</html>
